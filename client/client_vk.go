@@ -5,7 +5,6 @@ Package for work with api of vk.com
 */
 
 import (
-	"anti-captcha.com/ac_client"
 	"bufio"
 	"bytes"
 	"encoding/json"
@@ -32,6 +31,7 @@ const (
 	minimumRate          = time.Second / maxRequestsPerSecond
 )
 
+//client for requesting to vk api
 type Client struct {
 	lastRequest time.Time
 	m           sync.Mutex
@@ -39,6 +39,7 @@ type Client struct {
 	Token       string
 }
 
+//check exist user and token
 func (c *Client) Check() bool {
 	req, _ := c.MakeRequest("users.get", url.Values{})
 	b, err := c.DoBytes(req)
@@ -56,8 +57,11 @@ func (c *Client) Check() bool {
 	return true
 }
 
+//read and close response from api vk.com
+//return slice of byte
 func (c *Client) DoBytes(req *http.Request) ([]byte, error) {
 	res, err := c.Do(req)
+	var ner ErrorResponse
 	if err != nil {
 		return []byte{}, err
 	}
@@ -66,6 +70,29 @@ func (c *Client) DoBytes(req *http.Request) ([]byte, error) {
 	if err != nil {
 		return []byte{}, err
 	}
+	json.Unmarshal(b, &ner)
+	if ner.Err.Code == 6 {
+		return c.DoBytes(req)
+	} else if ner.Err.Code == 14 {
+		var captcha ResponseCaptcha
+		json.Unmarshal(b, &captcha)
+		text := ""
+		fmt.Println(captcha.Error.Captcha_img)
+		open.Run(captcha.Error.Captcha_img[:len(captcha.Error.Captcha_img)-4])
+		reader := bufio.NewReader(os.Stdin)
+		fmt.Print("Enter text: \n")
+		text, err := reader.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+		text = text[:len(text)-1]
+		values := req.URL.Query()
+		values.Add("captcha_sid", captcha.Error.Captcha_sid)
+		values.Add("captcha_key", text)
+		req.URL.RawQuery = values.Encode()
+		return c.DoBytes(req)
+	}
+
 	return b, nil
 }
 
@@ -82,57 +109,33 @@ func (c *Client) LimitRate() {
 	c.lastRequest = now
 }
 
-func (c *Client) MakeRequest(name string, parms url.Values) (req *http.Request, err error) {
-	parms.Add(paramVersion, defaultVersion)
+// Create request
+// @name string - method of api
+// @params url.Values - params for method
+func (c *Client) MakeRequest(name string, params url.Values) (req *http.Request, err error) {
+	params.Add(paramVersion, defaultVersion)
 	if c.Token != "" {
-		parms.Add(paramToken, c.Token)
+		params.Add(paramToken, c.Token)
 	}
 	u := url.URL{}
 	u.Host = defaultHost
 	u.Scheme = defaultScheme
 	u.Path = path.Join(defaultPath, name)
 	//	u.RawQuery = parms.Encode()
-	req, err = http.NewRequest(defaultMethod, u.String(), bytes.NewBufferString(parms.Encode()))
+	req, err = http.NewRequest(defaultMethod, u.String(), bytes.NewBufferString(params.Encode()))
 	return req, err
 }
 
+//low-level response *http.Response
 func (c *Client) Do(req *http.Request) (res *http.Response, err error) {
 	c.LimitRate()
-	var ner ErrorResponse
-	//	request_count++
-	//	fmt.Println(request_count)
 	res, err = http.DefaultClient.Do(req)
-	if err != nil {
-		return res, err
-	}
-	b, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return res, err
-	}
-	json.Unmarshal(b, &ner)
-	if ner.Err.Code == 6 {
-		return c.Do(req)
-	} else if ner.Err.Code == 14 {
-		var captcha ResponseCaptcha
-		json.Unmarshal(b, &captcha)
-		text := ""
-		fmt.Println(captcha.Error.Captcha_img)
-		open.Run(captcha.Error.Captcha_img[:len(captcha.Error.Captcha_img)-4])
-		reader := bufio.NewReader(os.Stdin)
-		fmt.Print("Enter text: \n")
-		text, err := reader.ReadString('\n')
-		if err != nil {
-			return
-		}
-		text = text[:len(text)-1]
-		values := req.URL.Query()
-		values.Add("captcha_sid", captcha.Error.Captcha_sid)
-		values.Add("captcha_key", text)
-		req.URL.RawQuery = values.Encode()
-		return c.Do(req)
-	}
+
+	return 
 }
 
+//Sugar for method "execute"
+//more read https://vk.com/dev/execute
 func (c *Client) Execute(code string) (b []byte) {
 	var ner ErrorResponse
 	values := url.Values{}
@@ -157,6 +160,7 @@ func (c *Client) Execute(code string) (b []byte) {
 	return b
 }
 
+//Return default client with RPS 3
 func DefaultClient(token string) *Client {
 	return &Client{Token: token, minimumRate: minimumRate}
 }

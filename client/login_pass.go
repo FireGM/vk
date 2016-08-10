@@ -17,6 +17,8 @@ const (
 	authPath      = "/token"
 )
 
+//Client by login/password. Uses client_id of windows_app
+//Return client and bool. If login/password good - bool==true
 func GetClientWithLoginPassword(username, password string) (*Client, bool) {
 	token := GetTokenWithLoginPassword(username, password)
 	if token == "" {
@@ -26,7 +28,7 @@ func GetClientWithLoginPassword(username, password string) (*Client, bool) {
 }
 
 
-
+//get token for windows_app by login/password
 func GetTokenWithLoginPassword(username, password string) string {
 	params := paramsMake(username, password)
 	req, err := requestmake(params)
